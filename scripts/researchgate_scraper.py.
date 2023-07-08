@@ -1,0 +1,78 @@
+import requests
+from bs4 import BeautifulSoup
+import json
+import mysql.connector
+import os
+
+def get_url_list():
+    # This function should return a list of URLs to be scraped.
+    pass
+
+def get_post_data(url):
+    # Send GET request
+    response = requests.get(url)
+
+    # Initialize BeautifulSoup object to parse the response
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    # Find the script tag with type application/ld+json
+    script_tag = soup.find('script', {'type': 'application/ld+json'})
+
+    # Parse the JSON content
+    data = json.loads(script_tag.string)
+
+    # Return the relevant data
+    return data['mainEntity']
+
+# Create a connection to the database
+cnx = mysql.connector.connect(
+    user=os.getenv('DB_USER'),
+    password=os.getenv('DB_PASS'),
+    host=os.getenv('DB_HOST', 'localhost'),  # default to localhost if DB_HOST is not set
+    database=os.getenv('DB_NAME')
+)
+
+# Create a cursor object which can execute SQL commands
+cursor = cnx.cursor()
+
+# For each URL
+for url in get_url_list():
+    # Get the post data
+    post_data = get_post_data(url)
+
+    # Ignore posts without any answers
+    if 'suggestedAnswer' not in post_data:
+        continue
+
+    # For each answer
+    for answer in post_data['suggestedAnswer']:
+        # Prepare the INSERT statement
+        add_post = ("INSERT INTO posts "
+                    "(question_id, question_text, answer_id, answer_text, question_author_id, question_author_name, question_date, answer_author_id, answer_author_name, answer_date, question_url, answer_url) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+
+        # Prepare the data to be inserted
+        data_post = (
+            post_data['@id'],
+            post_data['text'],
+            answer['@id'],
+            answer['text'],
+            post_data['author']['@id'],
+            post_data['author']['name'],
+            post_data['dateCreated'],
+            answer['author']['@id'],
+            answer['author']['name'],
+            answer['dateCreated'],
+            post_data['url'],
+            answer['url']
+        )
+
+        # Execute the INSERT statement
+        cursor.execute(add_post, data_post)
+
+# Make sure the changes are committed to the database
+cnx.commit()
+
+# Close the cursor and connection
+cursor.close()
+cnx.close()
